@@ -16,22 +16,28 @@
 package dev.morling.onebrc;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.Map;
-import java.util.TreeMap;
-import java.util.stream.Collector;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 
-import static java.util.stream.Collectors.groupingBy;
 
 /*
  * Baseline:
  *   Run took: 317s (317371 millis), Run took: 344s (344601 millis), Run took: 313s (313099 millis)
+ * Buffered Reader:
+ *   BUFFER_SIZE = 8 * 1024 -> Run took: 95s (95365 millis)
+ *   BUFFER_SIZE = 1024 * 1024 -> Run took: 84s (84244 millis)
+ *   BUFFER_SIZE = 10 * 1024 * 1024 -> Run took: 91s (91515 millis)
  *
  */
 public class CalculateAverage_konrad {
 
-    private static final String FILE = "./measurements.txt";
+//    private static final String FILE = "./measurements.txt";
+    private static final String FILE = "./measurements_10.txt";
 
     private static record Measurement(String station, double value) {
         private Measurement(String[] parts) {
@@ -56,49 +62,44 @@ public class CalculateAverage_konrad {
         private long count;
     }
 
+    static int lineNo = 0;
 
+    final static Charset utf8 = StandardCharsets.UTF_8;
+    final static char nl = ';';
 
-    private static void priv_main(String[] args) throws IOException {
-        // Map<String, Double> measurements1 = Files.lines(Paths.get(FILE))
-        // .map(l -> l.split(";"))
-        // .collect(groupingBy(m -> m[0], averagingDouble(m -> Double.parseDouble(m[1]))));
-        //
-        // measurements1 = new TreeMap<>(measurements1.entrySet()
-        // .stream()
-        // .collect(toMap(e -> e.getKey(), e -> Math.round(e.getValue() * 10.0) / 10.0)));
-        // System.out.println(measurements1);
+    private static void processPart(final ByteBuffer bb, final int read) {
+        bb.position(0);//we reset the buffer position so we can read from it
+        final CharBuffer cb = utf8.decode(bb);
+        final char[] arr = cb.array();
+        final String str = new String(arr);
 
-        Collector<Measurement, MeasurementAggregator, ResultRow> collector = Collector.of(
-                MeasurementAggregator::new,
-                (a, m) -> {
-                    a.min = Math.min(a.min, m.value);
-                    a.max = Math.max(a.max, m.value);
-                    a.sum += m.value;
-                    a.count++;
-                },
-                (agg1, agg2) -> {
-                    var res = new MeasurementAggregator();
-                    res.min = Math.min(agg1.min, agg2.min);
-                    res.max = Math.max(agg1.max, agg2.max);
-                    res.sum = agg1.sum + agg2.sum;
-                    res.count = agg1.count + agg2.count;
-
-                    return res;
-                },
-                agg -> {
-                    return new ResultRow(agg.min, agg.sum / agg.count, agg.max);
-                });
-
-        Map<String, ResultRow> measurements = new TreeMap<>(Files.lines(Paths.get(FILE))
-                .map(l -> new Measurement(l.split(";")))
-                .collect(groupingBy(m -> m.station(), collector)));
-
-        System.out.println(measurements);
+        for (int i = 0; i < read; i++) {
+            if (arr[i] == nl) {
+                lineNo++;
+            }
+            System.out.print(arr[i]);
+        }
     }
 
-    public static void main(String[] args) throws IOException {
+
+
+    private static void privMain(String[] args) throws IOException {
+        final FileChannel fc = FileChannel.open(Path.of(FILE), StandardOpenOption.READ);
+        final ByteBuffer bb = ByteBuffer.allocate(1024);
+
+        int readBytes = fc.read(bb);
+        while (readBytes > 0) {
+            processPart(bb, readBytes);
+            bb.clear();
+            readBytes = fc.read(bb);
+        }
+
+        System.out.println("Lines: " + lineNo);
+    }
+
+    public static void main(final String[] args) throws IOException {
         final long start = System.currentTimeMillis();
-        priv_main(args);
+        privMain(args);
         final long finish = System.currentTimeMillis();
         System.out.println("Run took: " + (finish - start)/1000 + "s (" + (finish - start) + " millis)");
     }
